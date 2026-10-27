@@ -28,6 +28,22 @@ var cat_bar : HBoxContainer
 var piece_grid : GridContainer
 var hint : Label
 var msg : Label
+var chest_panel : VBoxContainer
+var chest_title : Label
+var chest_view : DragInventoryView
+var player_view : DragInventoryView
+var total_lbl : Label
+
+const MOVE_MSG : Dictionary = {
+	OpResult.OK: "ย้ายแล้ว",
+	OpResult.PARTIAL_FULL: "ย้ายได้ไม่ครบ ช่องเต็ม",
+	OpResult.DESTINATION_FULL: "ปลายทางเต็ม ย้ายไม่ได้",
+	OpResult.EMPTY_SOURCE: "ช่องนี้ไม่มีของ",
+	OpResult.SAME_INDEX: "ช่องเดิม",
+	OpResult.NOT_ENOUGH: "ของไม่พอ",
+}
+var _open_chest : Inventory = null
+
 
 func _ready() -> void:
 	db.load_from_directory("res://data/")
@@ -60,13 +76,32 @@ func _build_ui() -> void:
 	panel.add_child(hint)
 	msg = Label.new()
 	panel.add_child(msg)
+	chest_panel = VBoxContainer.new()
+	chest_panel.position = Vector2(680, 50)
+	chest_panel.visible = false
+	layer.add_child(chest_panel)
+	chest_title = Label.new()
+	chest_panel.add_child(chest_title)
+	chest_view = DragInventoryView.new()
+	chest_view.slot_dropped.connect(_on_slot_dropped)
+	chest_panel.add_child(chest_view)
+	var pl : Label = Label.new()
+	pl.text = "กระเป๋าผู้เล่น"
+	chest_panel.add_child(pl)
+	player_view = DragInventoryView.new()
+	player_view.slot_dropped.connect(_on_slot_dropped)
+	chest_panel.add_child(player_view)
+	total_lbl = Label.new()
+	chest_panel.add_child(total_lbl)
 
 func _set_mode(v : bool) -> void:
 	build_mode = v
+	if v:
+		_close_chest()
 	cat_bar.visible = v
 	piece_grid.visible = v
 	hint.visible = v
-	status.text = "BUILD MODE | ซ้าย=วาง ขวา=รื้อ R=หมุน B=ออก" if v else "กด B เข้าโหมดสร้าง"
+	status.text = "BUILD MODE | ซ้าย=วาง ขวา=รื้อ R=หมุน B=ออก" if v else "กด B เข้าโหมดสร้าง | คลิกซ้ายที่หีบเพื่อเปิด Esc=ปิด"
 	_refresh_pieces()
 	queue_redraw()
 
@@ -128,13 +163,52 @@ func _unhandled_input(e : InputEvent) -> void:
 	if e is InputEventKey and e.pressed and not e.echo:
 		if e.keycode == KEY_B:
 			_set_mode(not build_mode)
+		elif e.keycode == KEY_ESCAPE:
+			_close_chest()
 		elif build_mode and e.keycode == KEY_R:
 			_rotate()
-	elif build_mode and e is InputEventMouseButton and e.pressed:
-		if e.button_index == MOUSE_BUTTON_LEFT:
-			_place()
-		elif e.button_index == MOUSE_BUTTON_RIGHT:
-			_remove()
+	elif e is InputEventMouseButton and e.pressed:
+		if build_mode:
+			if e.button_index == MOUSE_BUTTON_LEFT:
+				_place()
+			elif e.button_index == MOUSE_BUTTON_RIGHT:
+				_remove()
+		elif e.button_index == MOUSE_BUTTON_LEFT:
+			_open_chest_at(BuildConst.world_to_cell(get_global_mouse_position()))
+
+func _open_chest_at(cell : Vector2i) -> void:
+	var sid : String = grid.chest_id_at(cell)
+	if sid == "":
+		return
+	_open_chest = grid.chest(sid)
+	chest_title.text = "หีบ: " + sid
+	chest_view.bind(_open_chest)
+	player_view.bind(inv)
+	chest_panel.visible = true
+	_update_total()
+	msg.text = ""
+
+func _close_chest() -> void:
+	_open_chest = null
+	chest_panel.visible = false
+
+func _on_slot_dropped(src : Inventory, si : int, dst : Inventory, di : int) -> void:
+	var r : Dictionary
+	if src == dst:
+		r = src.move_slots(si, di)
+	else:
+		if si >= src.slots.size() or src.slots[si].item_data == null:
+			msg.text = MOVE_MSG[OpResult.EMPTY_SOURCE]
+			return
+		var s : InventorySlot = src.slots[si]
+		r = src.transfer_to(dst, db, s.item_data.id, s.quantity)
+	msg.text = MOVE_MSG.get(r["reason"], "ทำไม่ได้: " + String(r["reason"]))
+	_update_total()
+
+# แสดงผลรวมหิน (กระเป๋า + ทุกหีบ) ต้องคงที่ = 50 ตลอด
+func _update_total() -> void:
+	total_lbl.text = "รวมหิน (กระเป๋า+หีบ): %d" % (inv.count_of(&"stone_00") + grid.count_in_chests(&"stone_00"))
+
 
 func _process(_d : float) -> void:
 	if not build_mode:
