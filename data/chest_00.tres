@@ -5,6 +5,7 @@
 
 [resource]
 script = ExtResource("2_k1t04")
+can_be_rotated = false
 category = 3
 id = &"chest_00"
 display_name = "Wooden Chest"

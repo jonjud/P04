@@ -5,7 +5,7 @@
 
 [resource]
 script = ExtResource("2_0xfao")
-scene_path = "res://data/wall_00.tres"
+can_be_rotated = false
 category = 1
 id = &"wall_00"
 display_name = "Basic Wall"

@@ -5,7 +5,7 @@
 
 [resource]
 script = ExtResource("2_i3ine")
-scene_path = "res://data/workbench_00.tres"
+size_in_cells = Vector2i(2, 1)
 category = 2
 id = &"workbench_00"
 display_name = "Workbench"
