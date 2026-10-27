@@ -73,6 +73,7 @@ func test_place_basic() -> void:
 	r = g.place(db, inv, &"floor_00", Vector2i(2, 2), 0)
 	t("floor on floor overlap", rs(r) == BuildResult.OVERLAP)
 	t("total wall conserved", total(g, [inv], &"wall_00") == 3)
+	t("all_structs matches", g.all_structs().size() == g.struct_count() and g.all_structs()[0]["piece"] == "wall_00")
 
 # ---------- ขอบเขต ----------
 func test_bounds() -> void:

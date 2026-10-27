@@ -62,6 +62,15 @@ func count_in_chests(id : StringName) -> int:
 		n += _chests[sid].count_of(id)
 	return n
 
+func all_structs() -> Array:
+	var out : Array = []
+	var uids : Array = _structs.keys()
+	uids.sort()
+	for uid in uids:
+		var s : Dictionary = _structs[uid]
+		out.append({"uid": uid, "piece": s["piece"], "cell": s["cell"], "rot": s["rot"]})
+	return out
+
 # ---------- validity (ไม่แก้ state, ใช้กับ ghost ได้) ----------
 func check(db : ItemDatabase, id : StringName, cell : Vector2i, rot : int) -> Dictionary:
 	if db == null:
