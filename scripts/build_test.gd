@@ -33,6 +33,10 @@ var chest_title : Label
 var chest_view : DragInventoryView
 var player_view : DragInventoryView
 var total_lbl : Label
+var player : CharacterBody2D
+var prompt : Label
+var _target : Dictionary = {}
+var _open_pos : Vector2 = Vector2.ZERO
 
 const MOVE_MSG : Dictionary = {
 	OpResult.OK: "ย้ายแล้ว",
@@ -46,12 +50,35 @@ var _open_chest : Inventory = null
 
 
 func _ready() -> void:
+	_ensure_actions()
 	db.load_from_directory("res://data/")
 	for e in [[&"floor_00", 20], [&"wall_00", 20], [&"workbench_00", 2], [&"chest_00", 2], [&"stone_00", 50]]:
 		inv.add_to_existing_stacks(db, e[0], e[1])
 	inv.inventory_changed.connect(_refresh_pieces)
+	player = (load("res://scenes/player.tscn") as PackedScene).instantiate()
+	player.position = Vector2(320, 400)
+	add_child(player)
+	player.inv = inv      # ตั้งหลัง add_child เพราะ _ready ของ player สร้าง inv/db ของตัวเองไว้ก่อน
+	player.db = db
+	player.pickup_done.connect(_on_pickup_done)
+	for p in [[&"wood_00", 30, Vector2(160, 400)], [&"fiber_00", 120, Vector2(480, 400)]]:
+		var pk : Pickup = (load("res://scenes/pickup.tscn") as PackedScene).instantiate()
+		pk.item_id = p[0]
+		pk.amount = p[1]
+		pk.position = p[2]
+		pk.add_to_group("pickup")
+		add_child(pk)
 	_build_ui()
 	_set_mode(false)
+
+func _ensure_actions() -> void:
+	var keys : Dictionary = {"move_left": KEY_A, "move_right": KEY_D, "move_up": KEY_W, "move_down": KEY_S}
+	for a in keys:
+		if not InputMap.has_action(a):
+			InputMap.add_action(a)
+			var ev : InputEventKey = InputEventKey.new()
+			ev.physical_keycode = keys[a]
+			InputMap.action_add_event(a, ev)
 
 func _build_ui() -> void:
 	var layer : CanvasLayer = CanvasLayer.new()
@@ -93,6 +120,9 @@ func _build_ui() -> void:
 	chest_panel.add_child(player_view)
 	total_lbl = Label.new()
 	chest_panel.add_child(total_lbl)
+	prompt = Label.new()
+	prompt.position = Vector2(10, 500)
+	layer.add_child(prompt)
 
 func _set_mode(v : bool) -> void:
 	build_mode = v
@@ -101,7 +131,7 @@ func _set_mode(v : bool) -> void:
 	cat_bar.visible = v
 	piece_grid.visible = v
 	hint.visible = v
-	status.text = "BUILD MODE | ซ้าย=วาง ขวา=รื้อ R=หมุน B=ออก" if v else "กด B เข้าโหมดสร้าง | คลิกซ้ายที่หีบเพื่อเปิด Esc=ปิด"
+	status.text = "BUILD MODE | ซ้าย=วาง ขวา=รื้อ R=หมุน B=ออก" if v else "WASD เดิน | E โต้ตอบ | B สร้าง | Esc ปิดหีบ"
 	_refresh_pieces()
 	queue_redraw()
 
@@ -165,28 +195,33 @@ func _unhandled_input(e : InputEvent) -> void:
 			_set_mode(not build_mode)
 		elif e.keycode == KEY_ESCAPE:
 			_close_chest()
+		elif e.keycode == KEY_E and not build_mode:
+			_interact()
 		elif build_mode and e.keycode == KEY_R:
 			_rotate()
-	elif e is InputEventMouseButton and e.pressed:
-		if build_mode:
-			if e.button_index == MOUSE_BUTTON_LEFT:
-				_place()
-			elif e.button_index == MOUSE_BUTTON_RIGHT:
-				_remove()
-		elif e.button_index == MOUSE_BUTTON_LEFT:
-			_open_chest_at(BuildConst.world_to_cell(get_global_mouse_position()))
+	elif e is InputEventMouseButton and e.pressed and build_mode:
+		if e.button_index == MOUSE_BUTTON_LEFT:
+			_place()
+		elif e.button_index == MOUSE_BUTTON_RIGHT:
+			_remove()
 
-func _open_chest_at(cell : Vector2i) -> void:
-	var sid : String = grid.chest_id_at(cell)
-	if sid == "":
-		return
+func _open_chest_by_id(sid : String, pos : Vector2) -> void:
 	_open_chest = grid.chest(sid)
+	if _open_chest == null:
+		return
+	_open_pos = pos
 	chest_title.text = "หีบ: " + sid
 	chest_view.bind(_open_chest)
 	player_view.bind(inv)
 	chest_panel.visible = true
 	_update_total()
 	msg.text = ""
+
+const PICK_MSG : Dictionary = {
+	OpResult.OK: "เก็บแล้ว",
+	OpResult.PARTIAL_FULL: "เก็บได้ไม่ครบ กระเป๋าเต็ม",
+	OpResult.FULL: "กระเป๋าเต็ม",
+}
 
 func _close_chest() -> void:
 	_open_chest = null
@@ -211,15 +246,54 @@ func _update_total() -> void:
 
 
 func _process(_d : float) -> void:
-	if not build_mode:
-		return
-	_cell = BuildConst.world_to_cell(get_global_mouse_position())
-	_ghost = grid.check(db, sel_id, _cell, rot) if sel_id != &"" else {}
-	if _ghost.is_empty():
-		hint.text = "เลือกชิ้นส่วนจากแถบด้านบน"
+	if build_mode:
+		_cell = BuildConst.world_to_cell(get_global_mouse_position())
+		_ghost = grid.check(db, sel_id, _cell, rot) if sel_id != &"" else {}
+		if _ghost.is_empty():
+			hint.text = "เลือกชิ้นส่วนจากแถบด้านบน"
+		else:
+			hint.text = "วางได้" if _ghost["ok"] else "วางไม่ได้: " + REASONS.get(_ghost["reason"], String(_ghost["reason"]))
+		_target = {}
 	else:
-		hint.text = "วางได้" if _ghost["ok"] else "วางไม่ได้: " + REASONS.get(_ghost["reason"], String(_ghost["reason"]))
+		_target = InteractPick.pick(player.global_position, player.get_facing(), _candidates())
+		if _open_chest != null and player.global_position.distance_to(_open_pos) > InteractPick.RANGE * 1.5:
+			_close_chest()
+	prompt.text = _prompt_text(_target)
 	queue_redraw()
+
+func _on_pickup_done(r : Dictionary) -> void:
+	msg.text = PICK_MSG.get(r["reason"], "เก็บไม่ได้: " + String(r["reason"]))
+
+func _candidates() -> Array:
+	var out : Array = []
+	for pk in get_tree().get_nodes_in_group("pickup"):
+		if is_instance_valid(pk) and not pk.is_queued_for_deletion():
+			out.append({"kind": InteractPick.KIND_PICKUP, "pos": pk.global_position, "ref": pk})
+	for s in grid.all_structs():
+		var sid : String = BuildGrid.storage_id(s["uid"])
+		if grid.chest(sid) == null:
+			continue
+		var p : BuildingPieceData = db.get_item(StringName(s["piece"])) as BuildingPieceData
+		var c : Vector2 = BuildConst.cell_to_world(s["cell"]) + Vector2(BuildGrid.footprint(p, s["rot"]) * BuildConst.CELL_SIZE) / 2.0
+		out.append({"kind": InteractPick.KIND_INTERACT, "pos": c, "ref": sid})
+	return out
+
+func _prompt_text(c : Dictionary) -> String:
+	if c.is_empty():
+		return ""
+	if c["kind"] == InteractPick.KIND_INTERACT:
+		return "E: เปิดหีบ " + String(c["ref"])
+	var pk : Pickup = c["ref"]
+	var it : ItemData = db.get_item(pk.item_id)
+	return "E: เก็บ %s x%d" % [it.display_name if it != null else String(pk.item_id), pk.amount]
+
+func _interact() -> void:
+	if _target.is_empty():
+		return
+	if _target["kind"] == InteractPick.KIND_PICKUP:
+		_target["ref"].interact(player)
+	else:
+		_open_chest_by_id(_target["ref"], _target["pos"])
 
 func _rect(cell : Vector2i, fp : Vector2i) -> Rect2:
 	return Rect2(BuildConst.cell_to_world(cell), Vector2(fp * BuildConst.CELL_SIZE))
@@ -252,3 +326,9 @@ func _draw() -> void:
 			draw_rect(r, Color(1, 0.2, 0.2), false, 2.0)
 			draw_line(r.position, r.end, Color(1, 0.2, 0.2), 2.0)   # กากบาท: ไม่พึ่งสีอย่างเดียว
 			draw_line(Vector2(r.position.x, r.end.y), Vector2(r.end.x, r.position.y), Color(1, 0.2, 0.2), 2.0)
+	if not build_mode:
+		var o : Vector2 = player.global_position
+		draw_line(o, o + player.get_facing() * InteractPick.RANGE, Color(1, 1, 0, 0.6), 2.0)
+		draw_arc(o, InteractPick.RANGE, 0, TAU, 48, Color(1, 1, 0, 0.15), 1.0)
+		if not _target.is_empty():
+			draw_arc(_target["pos"], 14.0, 0, TAU, 24, Color(1, 1, 0), 2.0)

@@ -40,6 +40,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	_read_input()
 	_smooth_input_step(delta)
+	_track_facing()
 	_apply_movement(delta)
 	_apply_external_force(delta)
 	move_and_slide()
@@ -83,6 +84,10 @@ func _update_facing(delta: float) -> void:
 	_last_facing = _smooth_input.normalized()
 	var target_angle: float = _last_facing.angle() #หมุน parent เพื่อไม่ให้ colorect เพี้ยน
 	rotation = lerp_angle(rotation, target_angle, 1.0 - exp(-turn_speed * delta))
+
+func _track_facing() -> void:
+	if _smooth_input.length_squared() > 0.01:
+		_last_facing = _smooth_input.normalized()
 #---------- PUBLIC API ----------
 func get_facing() -> Vector2:
 	return _last_facing
