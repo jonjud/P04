@@ -6,9 +6,9 @@ class_name BuildResult
 static func make(reason: StringName, requested: int, done: int) -> Dictionary:
 	var remaining: int = requested - done
 	assert(requested >= 0 and done >= 0 and remaining >= 0, "BuildResult counts must be valid")
-	assert((reason == BuildGrid.OK) == (done == requested), "ok reason and completed count must agree")
+	assert((reason == &"ok") == (done == requested), "ok reason and completed count must agree")
 	return {
-		"ok": reason == BuildGrid.OK,
+		"ok": reason == &"ok",
 		"reason": reason,
 		"requested": requested,
 		"done": done,
