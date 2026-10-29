@@ -39,6 +39,11 @@ func total(g : BuildGrid, invs : Array, id : StringName) -> int:
 	return n
 
 func rs(r : Dictionary) -> StringName:
+	t("result shape keys", r.has("ok") and r.has("reason") and r.has("requested") and r.has("done") and r.has("remaining"))
+	t("result reason/ok invariant", r["ok"] == (r["reason"] == BuildGrid.OK))
+	t("result count invariant", r["done"] + r["remaining"] == r["requested"])
+	if r["ok"]:
+		t("result success is complete", r["done"] == r["requested"])
 	return r["reason"]
 
 # ---------- pure ----------
@@ -57,7 +62,8 @@ func test_place_basic() -> void:
 	var g : BuildGrid = BuildGrid.new()
 	var inv : Inventory = inv_with({&"floor_00": 3, &"wall_00": 3})
 	var r : Dictionary = g.check(db, &"wall_00", Vector2i(2, 2), 0)
-	t("check ok, done 0", r["ok"] and r["done"] == 0 and g.struct_count() == 0)
+	 t("check result shape", r["ok"] and r["requested"] == 0 and r["done"] == 0 and r["remaining"] == 0 and g.struct_count() == 0)
+	t("check result invariants", r["ok"] == (r["reason"] == BuildGrid.OK) and r["done"] + r["remaining"] == r["requested"] and (not r["ok"] or r["done"] == r["requested"]))
 	r = g.place(db, inv, &"wall_00", Vector2i(2, 2), 0)
 	t("place ok", r["ok"] and r["done"] == 1)
 	t("place: inv -1", inv.count_of(&"wall_00") == 2)
@@ -66,12 +72,12 @@ func test_place_basic() -> void:
 	t("adjacent ok", r["ok"] and g.struct_count() == 2)
 	var before : Dictionary = inv.to_dict()
 	r = g.place(db, inv, &"wall_00", Vector2i(2, 2), 0)
-	t("overlap rejected", rs(r) == BuildResult.OVERLAP and r["done"] == 0)
+	t("overlap rejected", rs(r) == BuildGrid.OVERLAP and r["done"] == 0)
 	t("overlap: inventory untouched", inv.to_dict() == before and g.struct_count() == 2)
 	r = g.place(db, inv, &"floor_00", Vector2i(2, 2), 0)
 	t("floor under wall ok (คนละ layer)", r["ok"] and g.struct_count() == 3)
 	r = g.place(db, inv, &"floor_00", Vector2i(2, 2), 0)
-	t("floor on floor overlap", rs(r) == BuildResult.OVERLAP)
+	t("floor on floor overlap", rs(r) == BuildGrid.OVERLAP)
 	t("total wall conserved", total(g, [inv], &"wall_00") == 3)
 	t("all_structs matches", g.all_structs().size() == g.struct_count() and g.all_structs()[0]["piece"] == "wall_00")
 
@@ -80,11 +86,11 @@ func test_bounds() -> void:
 	var g : BuildGrid = BuildGrid.new()
 	var inv : Inventory = inv_with({&"wall_00": 9, &"workbench_00": 9})
 	for c in [Vector2i(-1, 0), Vector2i(0, -1), Vector2i(20, 0), Vector2i(0, 15)]:
-		t("oob wall %s" % str(c), rs(g.place(db, inv, &"wall_00", c, 0)) == BuildResult.OUT_OF_BOUNDS)
+		t("oob wall %s" % str(c), rs(g.place(db, inv, &"wall_00", c, 0)) == BuildGrid.OUT_OF_BOUNDS)
 	t("corner (19,14) ok", g.place(db, inv, &"wall_00", Vector2i(19, 14), 0)["ok"])
-	t("wide piece oob x", rs(g.place(db, inv, &"workbench_00", Vector2i(19, 0), 0)) == BuildResult.OUT_OF_BOUNDS)
+	t("wide piece oob x", rs(g.place(db, inv, &"workbench_00", Vector2i(19, 0), 0)) == BuildGrid.OUT_OF_BOUNDS)
 	t("wide piece fits", g.place(db, inv, &"workbench_00", Vector2i(18, 0), 0)["ok"])
-	t("rotated piece oob y", rs(g.place(db, inv, &"workbench_00", Vector2i(0, 14), 1)) == BuildResult.OUT_OF_BOUNDS)
+	t("rotated piece oob y", rs(g.place(db, inv, &"workbench_00", Vector2i(0, 14), 1)) == BuildGrid.OUT_OF_BOUNDS)
 	t("rotated piece fits", g.place(db, inv, &"workbench_00", Vector2i(0, 13), 1)["ok"])
 	t("bounds: conserved", total(g, [inv], &"wall_00") == 9 and total(g, [inv], &"workbench_00") == 9)
 
@@ -98,24 +104,24 @@ func test_rotation() -> void:
 	t("rot1 placed", g.place(db, inv, &"workbench_00", Vector2i(5, 5), 1)["ok"])
 	t("rot1 covers (5,6) not (6,5)", g.struct_at(Vector2i(5, 6)) >= 0 and g.struct_at(Vector2i(6, 5)) < 0)
 	t("wall next to rot1 ok", g.place(db, inv, &"wall_00", Vector2i(6, 5), 0)["ok"])
-	t("wall blocked by rot1 footprint", rs(g.place(db, inv, &"wall_00", Vector2i(5, 6), 0)) == BuildResult.OVERLAP)
+	t("wall blocked by rot1 footprint", rs(g.place(db, inv, &"wall_00", Vector2i(5, 6), 0)) == BuildGrid.OVERLAP)
 	t("rot2 placed", g.place(db, inv, &"workbench_00", Vector2i(10, 10), 2)["ok"] and g.struct_at(Vector2i(11, 10)) >= 0)
 	t("rot3 placed", g.place(db, inv, &"workbench_00", Vector2i(14, 2), 3)["ok"] and g.struct_at(Vector2i(14, 3)) >= 0)
-	t("wall cannot rotate", rs(g.place(db, inv, &"wall_00", Vector2i(8, 8), 1)) == BuildResult.CANNOT_ROTATE)
-	t("chest cannot rotate", rs(g.place(db, inv, &"chest_00", Vector2i(8, 8), 2)) == BuildResult.CANNOT_ROTATE)
-	t("rot 4 bad", rs(g.check(db, &"workbench_00", Vector2i(8, 8), 4)) == BuildResult.BAD_ROTATION)
-	t("rot -1 bad", rs(g.check(db, &"workbench_00", Vector2i(8, 8), -1)) == BuildResult.BAD_ROTATION)
+	t("wall cannot rotate", rs(g.place(db, inv, &"wall_00", Vector2i(8, 8), 1)) == BuildGrid.CANNOT_ROTATE)
+	t("chest cannot rotate", rs(g.place(db, inv, &"chest_00", Vector2i(8, 8), 2)) == BuildGrid.CANNOT_ROTATE)
+	t("rot 4 bad", rs(g.check(db, &"workbench_00", Vector2i(8, 8), 4)) == BuildGrid.BAD_ROTATION)
+	t("rot -1 bad", rs(g.check(db, &"workbench_00", Vector2i(8, 8), -1)) == BuildGrid.BAD_ROTATION)
 
 # ---------- input ผิด ----------
 func test_invalid_input() -> void:
 	var g : BuildGrid = BuildGrid.new()
 	var inv : Inventory = inv_with({&"stone_00": 5, &"wall_00": 1})
-	t("not a piece", rs(g.place(db, inv, &"stone_00", Vector2i(0, 0), 0)) == BuildResult.UNKNOWN_PIECE)
-	t("unknown id", rs(g.place(db, inv, &"nope", Vector2i(0, 0), 0)) == BuildResult.UNKNOWN_PIECE)
-	t("null db", rs(g.place(null, inv, &"wall_00", Vector2i(0, 0), 0)) == BuildResult.NULL_DB)
-	t("null inv", rs(g.place(db, null, &"wall_00", Vector2i(0, 0), 0)) == BuildResult.NULL_INVENTORY)
+	t("not a piece", rs(g.place(db, inv, &"stone_00", Vector2i(0, 0), 0)) == BuildGrid.UNKNOWN_PIECE)
+	t("unknown id", rs(g.place(db, inv, &"nope", Vector2i(0, 0), 0)) == BuildGrid.UNKNOWN_PIECE)
+	t("null db", rs(g.place(null, inv, &"wall_00", Vector2i(0, 0), 0)) == BuildGrid.NULL_DB)
+	t("null inv", rs(g.place(db, null, &"wall_00", Vector2i(0, 0), 0)) == BuildGrid.NULL_INVENTORY)
 	var empty : Inventory = Inventory.new()
-	t("not enough", rs(g.place(db, empty, &"wall_00", Vector2i(0, 0), 0)) == BuildResult.NOT_ENOUGH)
+	t("not enough", rs(g.place(db, empty, &"wall_00", Vector2i(0, 0), 0)) == BuildGrid.NOT_ENOUGH)
 	t("invalid: grid empty, inv untouched", g.struct_count() == 0 and inv.count_of(&"wall_00") == 1 and inv.count_of(&"stone_00") == 5)
 
 # ---------- remove ----------
@@ -127,8 +133,8 @@ func test_remove() -> void:
 	t("remove ok", r["ok"] and r["done"] == 1)
 	t("remove: item returned, struct gone", inv.count_of(&"wall_00") == 2 and g.struct_at(Vector2i(4, 4)) < 0 and g.struct_count() == 0)
 	t("remove: cell reusable", g.place(db, inv, &"wall_00", Vector2i(4, 4), 0)["ok"])
-	t("remove nothing", rs(g.remove_at(db, inv, Vector2i(9, 9))) == BuildResult.NO_STRUCTURE)
-	t("remove null inv", rs(g.remove_at(db, null, Vector2i(4, 4))) == BuildResult.NULL_INVENTORY)
+	t("remove nothing", rs(g.remove_at(db, inv, Vector2i(9, 9))) == BuildGrid.NO_STRUCTURE)
+	t("remove null inv", rs(g.remove_at(db, null, Vector2i(4, 4))) == BuildGrid.NULL_INVENTORY)
 	# object ทับพื้น: รื้อได้ object ก่อน แล้วค่อยพื้น
 	var g2 : BuildGrid = BuildGrid.new()
 	var i2 : Inventory = inv_with({&"floor_00": 1, &"wall_00": 1})
@@ -147,7 +153,7 @@ func test_remove() -> void:
 	full.add_to_existing_stacks(db, &"stone_00", 99)
 	var before : Dictionary = full.to_dict()
 	r = g3.remove_at(db, full, Vector2i(0, 0))
-	t("remove when full rejected", rs(r) == BuildResult.INVENTORY_FULL and r["done"] == 0)
+	t("remove when full rejected", rs(r) == BuildGrid.INVENTORY_FULL and r["done"] == 0)
 	t("remove when full: nothing changed", full.to_dict() == before and g3.count_placed(&"wall_00") == 1)
 
 # ---------- chest ----------
@@ -166,7 +172,7 @@ func test_chest() -> void:
 	inv.add_to_existing_stacks(db, &"stone_00", 10)
 	# รื้อ chest ที่มีของ = ปฏิเสธ
 	var r : Dictionary = g.remove_at(db, inv, Vector2i(1, 1))
-	t("remove chest with items rejected", rs(r) == BuildResult.CHEST_NOT_EMPTY and g.chest(sid) != null and c.count_of(&"stone_00") == 40)
+	t("remove chest with items rejected", rs(r) == BuildGrid.CHEST_NOT_EMPTY and g.chest(sid) != null and c.count_of(&"stone_00") == 40)
 	t("withdraw ok", c.transfer_to(inv, db, &"stone_00", 40)["ok"])
 	r = g.remove_at(db, inv, Vector2i(1, 1))
 	t("remove empty chest ok", r["ok"] and g.chest(sid) == null and g.struct_count() == 0)
@@ -210,7 +216,7 @@ func test_serialize() -> void:
 	inv.transfer_to(g.chest(sid), db, &"stone_00", 12)
 	var d : Dictionary = g.to_dict()
 	var r : Dictionary = BuildGrid.from_dict(d, db)
-	t("ser ok", r["ok"] and r["reason"] == BuildResult.OK)
+	t("ser ok", r["ok"] and r["reason"] == BuildGrid.OK)
 	var g2 : BuildGrid = r["grid"]
 	t("ser round-trip", g2 != null and g2.to_dict() == d)
 	t("ser struct_at same", g2.struct_at(Vector2i(6, 4)) == g.struct_at(Vector2i(6, 4)) and g2.struct_count() == 4)
@@ -224,24 +230,24 @@ func test_serialize() -> void:
 	# ข้อมูลผิดต้องล้มทุกเคส
 	var bad : Dictionary = g.to_dict()
 	bad["schema_version"] = 99
-	t("ser bad schema", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.BAD_SCHEMA)
+	t("ser bad schema", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.BAD_SCHEMA)
 	bad = g.to_dict()
 	bad.erase("chests")
-	t("ser missing key", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.INCOMPLETE_DATA)
+	t("ser missing key", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.INCOMPLETE_DATA)
 	bad = g.to_dict()
 	bad["next_uid"] = 100
 	bad["structs"].append({"uid": 99, "piece": "wall_00", "x": 1, "y": 1, "rot": 0})
-	t("ser overlap in data", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.OVERLAP)
+	t("ser overlap in data", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.OVERLAP)
 	bad = g.to_dict()
 	bad["structs"][0]["piece"] = "nope"
-	t("ser unknown piece", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.UNKNOWN_PIECE)
+	t("ser unknown piece", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.UNKNOWN_PIECE)
 	bad = g.to_dict()
 	bad["chests"].erase(sid)
-	t("ser chest missing", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.BAD_DATA)
+	t("ser chest missing", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.BAD_DATA)
 	bad = g.to_dict()
 	bad["structs"][0]["x"] = 99
-	t("ser out of bounds in data", BuildGrid.from_dict(bad, db)["reason"] == BuildResult.OUT_OF_BOUNDS)
-	t("ser null db", BuildGrid.from_dict(g.to_dict(), null)["reason"] == BuildResult.NULL_DB)
+	t("ser out of bounds in data", BuildGrid.from_dict(bad, db)["reason"] == BuildGrid.OUT_OF_BOUNDS)
+	t("ser null db", BuildGrid.from_dict(g.to_dict(), null)["reason"] == BuildGrid.NULL_DB)
 
 # ---------- fuzz: ผลรวมต้องคงที่ทุกขั้น ----------
 func test_fuzz() -> void:
@@ -281,7 +287,7 @@ func test_fuzz() -> void:
 			r = inv.transfer_to(c, db, &"stone_00", q) if op == 2 else c.transfer_to(inv, db, &"stone_00", q)
 			if r["done"] > 0:
 				moved += 1
-		if r["reason"] == BuildResult.INTERNAL:
+		if r["reason"] == BuildGrid.INTERNAL:
 			internal += 1
 		for id in all:
 			if total(g, [inv], id) != want[id]:
