@@ -5,6 +5,24 @@ const SCHEMA_VERSION : int = 1
 const LAYER_FLOOR : int = 0
 const LAYER_OBJECT : int = 1
 
+# Build-specific result reasons; shared reasons use the same names/values as OpResult.
+const OK : StringName = &"ok"
+const NULL_DB : StringName = &"null_db"
+const NULL_INVENTORY : StringName = &"null_inventory"
+const UNKNOWN_PIECE : StringName = &"unknown_piece"
+const BAD_ROTATION : StringName = &"bad_rotation"
+const CANNOT_ROTATE : StringName = &"cannot_rotate"
+const OUT_OF_BOUNDS : StringName = &"out_of_bounds"
+const OVERLAP : StringName = &"overlap"
+const NOT_ENOUGH : StringName = &"not_enough_quantity"
+const NO_STRUCTURE : StringName = &"no_structure"
+const CHEST_NOT_EMPTY : StringName = &"chest_not_empty"
+const INVENTORY_FULL : StringName = &"inventory_full"
+const INTERNAL : StringName = &"internal"
+const INCOMPLETE_DATA : StringName = &"incomplete_data"
+const BAD_SCHEMA : StringName = &"bad_schema"
+const BAD_DATA : StringName = &"bad_data"
+
 var size : Vector2i = Vector2i(20, 15)   # ขอบเขตวางได้ (cell)
 var chest_slots : int = 20
 var _structs : Dictionary = {}           # uid -> {piece:String, cell:Vector2i, rot:int}
@@ -74,66 +92,66 @@ func all_structs() -> Array:
 # ---------- validity (ไม่แก้ state, ใช้กับ ghost ได้) ----------
 func check(db : ItemDatabase, id : StringName, cell : Vector2i, rot : int) -> Dictionary:
 	if db == null:
-		return BuildResult.make(BuildResult.NULL_DB, 0)
+		return BuildResult.make(BuildGrid.NULL_DB, 1, 0)
 	var p : BuildingPieceData = _piece(db, id)
 	if p == null:
-		return BuildResult.make(BuildResult.UNKNOWN_PIECE, 0)
+		return BuildResult.make(BuildGrid.UNKNOWN_PIECE, 1, 0)
 	if rot < 0 or rot > 3:
-		return BuildResult.make(BuildResult.BAD_ROTATION, 0)
+		return BuildResult.make(BuildGrid.BAD_ROTATION, 1, 0)
 	if rot != 0 and not p.can_be_rotated:
-		return BuildResult.make(BuildResult.CANNOT_ROTATE, 0)
+		return BuildResult.make(BuildGrid.CANNOT_ROTATE, 1, 0)
 	var fp : Vector2i = footprint(p, rot)
 	if cell.x < 0 or cell.y < 0 or cell.x + fp.x > size.x or cell.y + fp.y > size.y:
-		return BuildResult.make(BuildResult.OUT_OF_BOUNDS, 0)
+		return BuildResult.make(BuildGrid.OUT_OF_BOUNDS, 1, 0)
 	var layer : int = layer_of(p)
 	for x in range(fp.x):
 		for y in range(fp.y):
 			if _occ[layer].has(cell + Vector2i(x, y)):
-				return BuildResult.make(BuildResult.OVERLAP, 0)
-	return BuildResult.make(BuildResult.OK, 0)
+				return BuildResult.make(BuildGrid.OVERLAP, 1, 0)
+	return BuildResult.make(BuildGrid.OK, 0, 0)
 
 # ---------- place: ตรวจครบก่อน แล้วค่อยเขียน ----------
 func place(db : ItemDatabase, inv : Inventory, id : StringName, cell : Vector2i, rot : int) -> Dictionary:
 	if db == null:
-		return BuildResult.make(BuildResult.NULL_DB, 0)
+		return BuildResult.make(BuildGrid.NULL_DB, 1, 0)
 	if inv == null:
-		return BuildResult.make(BuildResult.NULL_INVENTORY, 0)
+		return BuildResult.make(BuildGrid.NULL_INVENTORY, 1, 0)
 	var r : Dictionary = check(db, id, cell, rot)
 	if not r["ok"]:
 		return r
 	if inv.count_of(id) < 1:
-		return BuildResult.make(BuildResult.NOT_ENOUGH, 0)
+		return BuildResult.make(BuildGrid.NOT_ENOUGH, 1, 0)
 	if not inv.remove_item(db, id, 1)["ok"]:
 		push_error("BuildGrid.place: ตรวจแล้วแต่ remove_item ล้ม")
-		return BuildResult.make(BuildResult.INTERNAL, 0)
+		return BuildResult.make(BuildGrid.INTERNAL, 1, 0)
 	_insert(_next_uid, _piece(db, id), cell, rot)
 	_next_uid += 1
-	return BuildResult.make(BuildResult.OK, 1)
+	return BuildResult.make(BuildGrid.OK, 1, 1)
 
 # ---------- remove: คืนเข้ากระเป๋าก่อน แล้วค่อยลบโครงสร้าง ----------
 func remove_at(db : ItemDatabase, inv : Inventory, cell : Vector2i) -> Dictionary:
 	if db == null:
-		return BuildResult.make(BuildResult.NULL_DB, 0)
+		return BuildResult.make(BuildGrid.NULL_DB, 1, 0)
 	if inv == null:
-		return BuildResult.make(BuildResult.NULL_INVENTORY, 0)
+		return BuildResult.make(BuildGrid.NULL_INVENTORY, 1, 0)
 	var uid : int = struct_at(cell)
 	if uid < 0:
-		return BuildResult.make(BuildResult.NO_STRUCTURE, 0)
+		return BuildResult.make(BuildGrid.NO_STRUCTURE, 1, 0)
 	var s : Dictionary = _structs[uid]
 	var id : StringName = StringName(s["piece"])
 	var p : BuildingPieceData = _piece(db, id)
 	if p == null:
-		return BuildResult.make(BuildResult.UNKNOWN_PIECE, 0)
+		return BuildResult.make(BuildGrid.UNKNOWN_PIECE, 1, 0)
 	var sid : String = storage_id(uid)
 	if _chests.has(sid) and not _is_empty(_chests[sid]):
-		return BuildResult.make(BuildResult.CHEST_NOT_EMPTY, 0)
+		return BuildResult.make(BuildGrid.CHEST_NOT_EMPTY, 1, 0)
 	if inv.free_space_for(p) < 1:
-		return BuildResult.make(BuildResult.INVENTORY_FULL, 0)
+		return BuildResult.make(BuildGrid.INVENTORY_FULL, 1, 0)
 	if not inv.add_to_existing_stacks(db, id, 1)["ok"]:
 		push_error("BuildGrid.remove_at: free_space_for ผ่านแต่ add ล้ม")
-		return BuildResult.make(BuildResult.INTERNAL, 0)
+		return BuildResult.make(BuildGrid.INTERNAL, 1, 0)
 	_erase(uid, p)
-	return BuildResult.make(BuildResult.OK, 1)
+	return BuildResult.make(BuildGrid.OK, 1, 1)
 
 # ---------- internal ----------
 func _is_empty(inv : Inventory) -> bool:
@@ -183,31 +201,31 @@ static func _fail(reason : StringName) -> Dictionary:
 
 static func from_dict(data : Dictionary, db : ItemDatabase) -> Dictionary:
 	if db == null:
-		return _fail(BuildResult.NULL_DB)
+		return _fail(BuildGrid.NULL_DB)
 	for k in ["schema_version", "size", "next_uid", "structs", "chests"]:
 		if not data.has(k):
-			return _fail(BuildResult.INCOMPLETE_DATA)
+			return _fail(BuildGrid.INCOMPLETE_DATA)
 	if data["schema_version"] != SCHEMA_VERSION:
-		return _fail(BuildResult.BAD_SCHEMA)
+		return _fail(BuildGrid.BAD_SCHEMA)
 	var sz = data["size"]
 	if typeof(sz) != TYPE_ARRAY or sz.size() != 2 or typeof(sz[0]) != TYPE_INT or typeof(sz[1]) != TYPE_INT or sz[0] < 1 or sz[1] < 1:
-		return _fail(BuildResult.BAD_DATA)
+		return _fail(BuildGrid.BAD_DATA)
 	if typeof(data["next_uid"]) != TYPE_INT or typeof(data["structs"]) != TYPE_ARRAY or typeof(data["chests"]) != TYPE_DICTIONARY:
-		return _fail(BuildResult.BAD_DATA)
+		return _fail(BuildGrid.BAD_DATA)
 	var g : BuildGrid = BuildGrid.new()
 	g.size = Vector2i(sz[0], sz[1])
 	var storage : Array = []
 	for s in data["structs"]:
 		if typeof(s) != TYPE_DICTIONARY:
-			return _fail(BuildResult.BAD_DATA)
+			return _fail(BuildGrid.BAD_DATA)
 		for k in ["uid", "piece", "x", "y", "rot"]:
 			if not s.has(k):
-				return _fail(BuildResult.INCOMPLETE_DATA)
+				return _fail(BuildGrid.INCOMPLETE_DATA)
 		if typeof(s["piece"]) != TYPE_STRING or typeof(s["uid"]) != TYPE_INT or typeof(s["x"]) != TYPE_INT or typeof(s["y"]) != TYPE_INT or typeof(s["rot"]) != TYPE_INT:
-			return _fail(BuildResult.BAD_DATA)
+			return _fail(BuildGrid.BAD_DATA)
 		var uid : int = s["uid"]
 		if uid < 1 or uid >= data["next_uid"] or g._structs.has(uid):
-			return _fail(BuildResult.BAD_DATA)
+			return _fail(BuildGrid.BAD_DATA)
 		var id : StringName = StringName(s["piece"])
 		var cell : Vector2i = Vector2i(s["x"], s["y"])
 		var r : Dictionary = g.check(db, id, cell, s["rot"])
@@ -218,14 +236,14 @@ static func from_dict(data : Dictionary, db : ItemDatabase) -> Dictionary:
 			storage.append(storage_id(uid))
 	g._next_uid = data["next_uid"]
 	if data["chests"].size() != storage.size():
-		return _fail(BuildResult.BAD_DATA)
+		return _fail(BuildGrid.BAD_DATA)
 	for sid in storage:
 		if not data["chests"].has(sid) or typeof(data["chests"][sid]) != TYPE_DICTIONARY:
-			return _fail(BuildResult.BAD_DATA)
+			return _fail(BuildGrid.BAD_DATA)
 		var ir : Dictionary = Inventory.from_dict(data["chests"][sid], db)
 		if not ir["ok"]:
 			return _fail(ir["reason"])
 		if ir["inventory"].owner_id != sid:
-			return _fail(BuildResult.BAD_DATA)
+			return _fail(BuildGrid.BAD_DATA)
 		g._chests[sid] = ir["inventory"]
-	return {"ok": true, "grid": g, "reason": BuildResult.OK}
+	return {"ok": true, "grid": g, "reason": BuildGrid.OK}
