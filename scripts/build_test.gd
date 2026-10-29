@@ -2,14 +2,14 @@ extends Node2D
 # UI ไม่ถือ state ของโครงสร้าง/ของ: อยู่ใน BuildGrid กับ Inventory ทั้งหมด
 
 const REASONS : Dictionary = {
-	BuildResult.OK: "วางแล้ว",
-	BuildResult.OUT_OF_BOUNDS: "ออกนอกพื้นที่",
-	BuildResult.OVERLAP: "มีของวางทับอยู่",
-	BuildResult.CANNOT_ROTATE: "ชิ้นนี้หมุนไม่ได้",
-	BuildResult.NOT_ENOUGH: "ไม่มีชิ้นนี้ในกระเป๋า",
-	BuildResult.NO_STRUCTURE: "ไม่มีอะไรให้รื้อ",
-	BuildResult.CHEST_NOT_EMPTY: "หีบยังมีของ เอาออกก่อน",
-	BuildResult.INVENTORY_FULL: "กระเป๋าเต็ม รื้อไม่ได้",
+	BuildGrid.OK: "วางแล้ว",
+	BuildGrid.OUT_OF_BOUNDS: "ออกนอกพื้นที่",
+	BuildGrid.OVERLAP: "มีของวางทับอยู่",
+	BuildGrid.CANNOT_ROTATE: "ชิ้นนี้หมุนไม่ได้",
+	BuildGrid.NOT_ENOUGH: "ไม่มีชิ้นนี้ในกระเป๋า",
+	BuildGrid.NO_STRUCTURE: "ไม่มีอะไรให้รื้อ",
+	BuildGrid.CHEST_NOT_EMPTY: "หีบยังมีของ เอาออกก่อน",
+	BuildGrid.INVENTORY_FULL: "กระเป๋าเต็ม รื้อไม่ได้",
 }
 const CAT_COLORS : Array = [Color(0.55, 0.45, 0.3), Color(0.5, 0.5, 0.55), Color(0.3, 0.5, 0.8), Color(0.8, 0.6, 0.2)]
 const CAT_NAMES : Array = ["พื้น", "ผนัง", "สถานี", "หีบ"]   # ลำดับต้องตรง BuildingCategory
@@ -174,7 +174,7 @@ func _rotate() -> void:
 	if p.can_be_rotated:
 		rot = (rot + 1) % 4
 	else:
-		_show(BuildResult.CANNOT_ROTATE)
+		_show(BuildGrid.CANNOT_ROTATE)
 
 func _place() -> void:
 	if sel_id == &"":
